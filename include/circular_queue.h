@@ -7,7 +7,7 @@
 // ----------------------------
 // Macro para declarar estructuras y prototipos
 // ----------------------------
-#define DECLARE_LINKED_LIST(TYPE) \
+#define DECLARE_circular_queue(TYPE) \
     typedef struct Node_##TYPE { \
         TYPE data; \
         struct Node_##TYPE* next; \
@@ -33,7 +33,7 @@
 // ----------------------------
 // Macro para implementación
 // ----------------------------
-#define IMPLEMENT_LINKED_LIST(TYPE) \
+#define IMPLEMENT_circular_queue(TYPE) \
     Node_##TYPE* node_##TYPE##__create(TYPE data){\
         Node_##TYPE* new_node = malloc(sizeof(Node_##TYPE)); \
         new_node->data = data;\
@@ -58,11 +58,14 @@
     \
     void list_##TYPE##_destroy(List_##TYPE* list) { \
         if (!list) return; \
-        Node_##TYPE* current = list->head; \
-        while (current) { \
-            Node_##TYPE* temp = current; \
-            current = current->next; \
-            free(temp); \
+        if (list->head) { \
+            Node_##TYPE* current = list->head; \
+            Node_##TYPE* next = NULL; \
+            do { \
+                next = current->next; \
+                free(current); \
+                current = next; \
+            } while (current != list->head); \
         } \
         free(list); \
     } \
@@ -71,16 +74,17 @@
         if (!list || pos > list->length) return false; \
         \
         Node_##TYPE* new_node = node_##TYPE##_create(data); \
-        if (!new_node) return false; \        
+        if (!new_node) return false; \
         \
         if (pos == 0) { \
-            new_node->next = list->head; \
-            list->head = new_node; \
-            if (!list->tail) list->tail = new_node; \
-        } else if (pos == list->length) { \
-            new_node->next = NULL; \
-            list->tail->next = new_node; \
-            list->tail = new_node; \
+            if (!list->head) { \
+                list->head = list->tail = new_node; \
+                new_node->next = new_node; \
+            } else { \
+                new_node->next = list->head; \
+                list->head = new_node; \
+                list->tail->next = list->head; \
+            } \
         } else { \
             Node_##TYPE* current = list->head; \
             for (size_t i = 0; i < pos - 1; ++i) { \
@@ -88,9 +92,12 @@
             } \
             new_node->next = current->next; \
             current->next = new_node; \
+            if (pos == list->length) { \
+                list->tail = new_node; \
+            } \
         } \
-        \
         list->length++; \
+        if (list->tail) list->tail->next = list->head; \
         return true; \
     } \
     \
@@ -105,8 +112,12 @@
         \
         if (pos == 0) { \
             to_delete = list->head; \
-            list->head = list->head->next; \
-            if (!list->head) list->tail = NULL; \
+            if (list->length == 1) { \
+                list->head = list->tail = NULL; \
+            } else { \
+                list->head = list->head->next; \
+                list->tail->next = list->head; \
+            } \
         } else { \
             Node_##TYPE* current = list->head; \
             for (size_t i = 0; i < pos - 1; ++i) { \
@@ -118,9 +129,9 @@
                 list->tail = current; \
             } \
         } \
-        \
         free(to_delete); \
         list->length--; \
+        if (list->tail) list->tail->next = list->head; \
         return true; \
     } \
     \
@@ -131,7 +142,6 @@
         for (size_t i = 0; i < pos; ++i) { \
             current = current->next; \
         } \
-        \
         *out = current->data; \
         return true; \
     } \
@@ -146,89 +156,68 @@
     \
     void list_##TYPE##_clear(List_##TYPE* list) { \
         if (!list) return; \
-        \
-        Node_##TYPE* current = list->head; \
-        while (current) { \
-            Node_##TYPE* temp = current; \
-            current = current->next; \
-            free(temp); \
+        while (list->length > 0) { \
+            list_##TYPE##_remove_at(list, 0); \
         } \
-        \
-        list->head = list->tail = NULL; \
-        list->length = 0; \
     } \
     \
     void list_##TYPE##_print(const List_##TYPE* list, void (*print_fn)(TYPE)) { \
-        if (!list || !print_fn) return; \
+        if (!list || !print_fn || list->length == 0) return; \
         \
         printf("["); \
         Node_##TYPE* current = list->head; \
-        while (current) { \
+        size_t count = 0; \
+        do { \
             print_fn(current->data); \
-            if (current->next) printf(", "); \
+            count++; \
+            if (count < list->length) printf(", "); \
             current = current->next; \
-        } \
+        } while (current != list->head); \
         printf("]\n"); \
     } \
     \
     bool list_##TYPE##_contains(const List_##TYPE* list, TYPE data) { \
-        if (!list) return false; \
+        if (!list || list->length == 0) return false; \
         \
         Node_##TYPE* current = list->head; \
-        while (current) { \
+        do { \
             if (current->data == data) { \
                 return true; \
             } \
             current = current->next; \
-        } \
+        } while (current != list->head); \
         \
         return false; \
     } \
     \
     bool list_##TYPE##_remove(List_##TYPE* list, TYPE data) { \
         if (!list) return false; \
-        \
-        Node_##TYPE* prev = NULL; \
+        Node_##TYPE* prev = list->tail; \
         Node_##TYPE* current = list->head; \
-        \
-        while (current) { \
+        size_t index = 0; \
+        do { \
             if (current->data == data) { \
-                if (prev) { \
-                    prev->next = current->next; \
-                    if (!current->next) { \
-                        list->tail = prev; \
-                    } \
-                } else { \
-                    list->head = current->next; \
-                    if (!list->head) { \
-                        list->tail = NULL; \
-                    } \
-                } \
-                \
-                free(current); \
-                list->length--; \
-                return true; \
+                return list_##TYPE##_remove_at(list, index); \
             } \
-            \
             prev = current; \
             current = current->next; \
-        } \
-        \
+            index++; \
+        } while (current != list->head); \
         return false; \
     }
 
 // ----------------------------
 // Declaración para tipos concretos
 // ----------------------------
-DECLARE_LINKED_LIST(int)
-DECLARE_LINKED_LIST(char)
-DECLARE_LINKED_LIST(float)
+DECLARE_circular_queue(int)
+DECLARE_circular_queue(char)
+DECLARE_circular_queue(float)
 
 // ----------------------------
 // Implementación para tipos concretos
 // ----------------------------
 #ifdef LINKED_LIST_IMPLEMENTATION
-IMPLEMENT_LINKED_LIST(int)
-IMPLEMENT_LINKED_LIST(char)
-IMPLEMENT_LINKED_LIST(float)
+IMPLEMENT_circular_queue(int)
+IMPLEMENT_circular_queue(char)
+IMPLEMENT_circular_queue(float)
 #endif
